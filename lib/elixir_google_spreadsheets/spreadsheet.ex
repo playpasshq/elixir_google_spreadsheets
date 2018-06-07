@@ -160,6 +160,17 @@ defmodule GSS.Spreadsheet do
     end
     def write_rows(_, _, _, _), do: {:error, GSS.InvalidInput}
 
+    @doc """
+    Batch append multiple rows.
+
+    Append rows in a spreadsheet after an index.
+    """
+    @spec append_rows(pid, integer(), [spreadsheet_data], Keyword.t) :: :ok
+    def append_rows(pid, row_index, values, options \\ []) when is_list(values) do
+      gen_server_call(pid, {:append_rows, row_index, values, options}, options)
+    end
+
+
 
     @doc """
     Get shreadsheet id stored in this state.
@@ -295,6 +306,40 @@ defmodule GSS.Spreadsheet do
             {:json, %{"updates" => %{
                 "updatedRows" => 1, "updatedColumns" => updated_columns
             }}} when updated_columns > 0 ->
+                {:reply, :ok, state}
+            {:error, exception} ->
+                {:reply, {:error, exception}, state}
+        end
+    end
+
+    @doc """
+    Insert rows under some other row and write the all values content there.
+    """
+    def handle_call(
+        {:append_rows, row_index, values, options},
+        _from,
+        %{spreadsheet_id: spreadsheet_id} = state
+    ) do
+        value_input_option = Keyword.get(options, :value_input_option, "USER_ENTERED")
+        insert_data_option = Keyword.get(options, :insert_data_option, "INSERT_ROWS")
+
+        write_cells_count = length(List.first(values))
+        column_from = Keyword.get(options, :column_from, 1)
+        column_to = Keyword.get(options, :column_to, column_from + write_cells_count - 1)
+        range = range(row_index, row_index, column_from, column_to, state)
+        query = "#{spreadsheet_id}/values/#{range}:append" <>
+            "?valueInputOption=#{value_input_option}&insertDataOption=#{insert_data_option}"
+
+        request_data = %{
+            range: range,
+            majorDimension: Keyword.get(options, :major_dimension, "ROWS"),
+            values: values
+        }
+
+        case spreadsheet_query_post_batch(query, request_data, options) do
+            {:json, %{"updates" => %{
+                "updatedRows" => updated_rows, "updatedColumns" => updated_columns
+            }}} when updated_columns > 0 and updated_rows > 0 ->
                 {:reply, :ok, state}
             {:error, exception} ->
                 {:reply, {:error, exception}, state}
